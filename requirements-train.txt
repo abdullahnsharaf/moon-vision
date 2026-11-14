@@ -1,0 +1,4 @@
+# Training the CNN (local machine only, not needed on Vercel)
+-r requirements.txt
+torch>=2.2
+onnx>=1.15

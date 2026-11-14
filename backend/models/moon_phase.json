@@ -1,0 +1,31 @@
+{
+  "classes": [
+    "new_moon",
+    "waxing_crescent",
+    "first_quarter",
+    "waxing_gibbous",
+    "full_moon",
+    "waning_gibbous",
+    "last_quarter",
+    "waning_crescent"
+  ],
+  "input_size": 128,
+  "mean": [
+    0.2,
+    0.2,
+    0.2
+  ],
+  "std": [
+    0.3,
+    0.3,
+    0.3
+  ],
+  "val_accuracy": 0.9871,
+  "epochs": 10,
+  "trained_on": [
+    "synthetic"
+  ],
+  "n_train": 4900,
+  "n_val": 700,
+  "note": "Input is the backend's disk crop (moon radius ~ 1/1.2 of half-side), RGB, Northern-Hemisphere orientation (lit on right = waxing)."
+}
