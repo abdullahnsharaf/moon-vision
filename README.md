@@ -8,7 +8,6 @@ browser (camera / file)  ──►  FastAPI  ──►  1. segmentation + disk f
                                             2. CNN phase classifier      (ONNX)
                                             3. fusion → phase class
                                             4. brightness A / B / C
-                                            5. calendar cross-check      (ephemeris)
 ```
 
 ## Quick start
@@ -34,7 +33,7 @@ The project is already set up for Vercel's zero-config FastAPI support:
 * `.vercelignore` leaves out training, tests and screenshots.
 * `vercel.json` gives the function up to 30 s.
 * Vercel limits a request to 4.5 MB, so the browser shrinks big photos (max 2048 px) before
-  uploading and sends the photo's date, shutter, aperture and ISO as separate fields, because
+  uploading and sends the photo's shutter, aperture and ISO as separate fields, because
   shrinking strips them from the file.
 
 **Option A – GitHub (recommended)**
@@ -60,7 +59,7 @@ Check it works: open `https://<your-project>.vercel.app/api/health`. It should r
   with Reem Kufi and IBM Plex Sans Arabic fonts. The choice is remembered, and the page starts
   in Arabic when the browser language is Arabic. All strings live in `frontend/i18n.js`. To add a
   language, copy the `en` block. The API returns codes (`warning_codes`,
-  `waxing_decided_by_code`, `ephemeris_source_code`) so the page can translate them.
+  `waxing_decided_by_code`) so the page can translate them.
 * **The dial.** The moon sits inside an astrolabe-style ring graduated in elongation (0° new,
   90° first quarter, 180° full, 270° last quarter). While idle it slowly cycles through a whole
   lunation. While analysing it sweeps like a scanner. When the result arrives it turns to the
@@ -86,13 +85,15 @@ Check it works: open `https://<your-project>.vercel.app/api/health`. It should r
 Phase bands by lit fraction: new < 3 % · crescent 3–40 % · quarter 40–60 % · gibbous 60–97 % · full ≥ 97 %.
 You can change them in `astro.py`.
 
-**Waxing or waning?** You can't tell from the shape alone. It depends on where the photo was taken:
+**Everything comes from the picture.** No date or calendar is used.
 
-* **Northern Hemisphere** – lit on the right = waxing
+**Waxing or waning?** Read from which side of the disk is lit, which depends on where the photo was taken:
+
+* **Northern Hemisphere** (default) – lit on the right = waxing
 * **Southern Hemisphere** – lit on the left = waxing (the crop is mirrored before the CNN)
-* **Auto** (default) – uses the photo's date (EXIF `DateTimeOriginal`, camera capture time,
-  or the date you type in). This is the right choice **near the equator** (e.g. Singapore),
-  where the crescent lies on its back and left/right doesn't work.
+
+Near the equator the crescent can lie almost on its back, so waxing vs waning is less certain
+there. The crescent/quarter/gibbous/full part of the answer is unaffected.
 
 ## Brightness – three methods
 
@@ -100,11 +101,7 @@ You can change them in `astro.py`.
 |---|---|---|---|---|
 | **A** | **Class reference** (your idea 1) – look up the range for the predicted class using the lunar phase law `m = −12.73 + 0.026·α + 4·10⁻⁹·α⁴` (Allen / Cox 2002) | magnitude range, lux range, % of full | simple, standard references | coarse – every crescent gets the same range |
 | **B** | **Pixel measurement** (your idea 2) – undo sRGB gamma and measure the lit pixels inside the mask: mean, p95, integrated flux, contrast vs sky, clipping % | relative index; **cd/m²** if EXIF has shutter/aperture/ISO (`L = K·N²/(t·S) · v/0.18`) | uses the actual photo; heat-map | depends on exposure, phone HDR, clouds; overexposed pixels clip |
-| **C** | **Photometric model** (new) – the *measured* lit fraction → phase angle `α = arccos(2k−1)` → magnitude → illuminance `E = 2.54·10⁻⁶ · 10^(−0.4 m)` lux, distance-corrected when the date is known | magnitude, lux, % of full | continuous like B, camera-independent like A | assumes a clear sky (no atmospheric extinction) |
-
-Plus a **calendar cross-check**: a truncated Meeus lunar ephemeris gives the true phase, lit
-fraction and Earth–Moon distance for the photo's date, and the UI shows whether the photo
-analysis agrees.
+| **C** | **Photometric model** (new) – the *measured* lit fraction → phase angle `α = arccos(2k−1)` → magnitude → illuminance `E = 2.54·10⁻⁶ · 10^(−0.4 m)` lux, at the mean Earth–Moon distance | magnitude, lux, % of full | continuous like B, camera-independent like A | assumes a clear sky (no atmospheric extinction) |
 
 Brightness falls off much faster than lit area. A half Moon is ~50 % lit but only ~9 % as
 bright as a full Moon, because of shadows and the opposition surge.
@@ -118,8 +115,7 @@ trees, city lights and phone HDR, so for good accuracy:
 
 1. Collect real photos into `data/real/<class>/` using the 8 class names:
    `new_moon waxing_crescent first_quarter waxing_gibbous full_moon waning_gibbous last_quarter waning_crescent`.
-   Sources: your own photos labelled by date (use `/api/ephemeris?when=...` to label them
-   automatically!), or public sets such as the Roboflow Universe "Phase Your Moon" dataset
+   Sources: your own photos (labelled by hand or with a moon-phase calendar), or public sets such as the Roboflow Universe "Phase Your Moon" dataset
    (8 classes) or Kaggle moon-phase datasets. Check each one's licence.
 2. `python training/train.py --real data/real --synthetic 800 --epochs 20`
 
@@ -130,8 +126,8 @@ and waning.
 ## API
 
 ```
-POST /api/analyze     multipart: file, hemisphere=auto|north|south, taken_at=ISO-8601 (optional)
-GET  /api/ephemeris?when=2026-11-14T20:00:00+08:00
+POST /api/analyze     multipart: file, hemisphere=north|south,
+                      exposure_time / f_number / iso (optional, used for pixel calibration)
 GET  /api/health
 ```
 
@@ -144,7 +140,7 @@ backend/
   moon_cv/cnn.py         ONNX inference
   moon_cv/analyze.py     fusion, EXIF, orchestration
   moon_cv/brightness.py  methods B and C + visualisations
-  moon_cv/astro.py       phase law (method A), ephemeris
+  moon_cv/astro.py       phase classes + phase law (method A)
   models/                moon_phase.onnx + .json
 frontend/                index.html, style.css, app.js, i18n.js, lottie/, vendor/, samples/
 tools/make_lottie.py     generates the Lottie animations

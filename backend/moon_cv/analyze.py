@@ -8,17 +8,15 @@ Phase decision = fusion of two independent "experts":
 Both are collapsed into  P(band) x P(waxing)  where band is one of
 new / crescent / quarter / gibbous / full, then averaged.
 
-Waxing vs waning depends on where you stand:
-  north  - lit on the RIGHT  = waxing
+Everything comes from the picture itself. Waxing vs waning is read from
+which side of the disk is lit, and that depends on where you stand:
+  north  - lit on the RIGHT  = waxing (default)
   south  - lit on the LEFT   = waxing (image is mirrored before the CNN)
-  auto   - use the photo's date (EXIF or capture time) -> ephemeris;
-           falls back to "north" if no date is known.
 """
 from __future__ import annotations
 
 import io
 import math
-from datetime import datetime, timedelta, timezone
 
 import cv2
 import numpy as np
@@ -74,20 +72,7 @@ def read_image_and_exif(data: bytes):
         "f_number": _ratio(exif_raw.get("FNumber")),
         "iso": _ratio(exif_raw.get("ISOSpeedRatings") or exif_raw.get("PhotographicSensitivity")),
         "camera": " ".join(str(exif_raw.get(k, "")).strip() for k in ("Make", "Model")).strip() or None,
-        "datetime": None,
     }
-    dt_str = exif_raw.get("DateTimeOriginal") or exif_raw.get("DateTime")
-    if dt_str:
-        try:
-            dt = datetime.strptime(str(dt_str).strip(), "%Y:%m:%d %H:%M:%S")
-            off = exif_raw.get("OffsetTimeOriginal") or exif_raw.get("OffsetTime")
-            if off:
-                sign = -1 if str(off).startswith("-") else 1
-                hh, mm = str(off).lstrip("+-").split(":")
-                dt = dt.replace(tzinfo=timezone(sign * timedelta(hours=int(hh), minutes=int(mm))))
-            exif["datetime"] = dt
-        except Exception:
-            pass
     return bgr, exif
 
 
@@ -131,39 +116,19 @@ def compose_classes(band_p: dict[str, float], p_wax: float) -> dict[str, float]:
 
 
 # ---------------------------------------------------------------- main entry
-def analyze(data: bytes, hemisphere: str = "auto", client_datetime: str | None = None,
-            include_images: bool = True, client_exif: dict | None = None) -> dict:
+def analyze(data: bytes, hemisphere: str = "north", include_images: bool = True,
+            client_exif: dict | None = None) -> dict:
     bgr, exif = read_image_and_exif(data)
     for k, v in (client_exif or {}).items():          # fill gaps from EXIF the browser read
         if v and not exif.get(k):
             exif[k] = float(v)
 
-    # ---------- when was it taken?
-    when, when_src = exif["datetime"], "photo EXIF"
-    if when is None and client_datetime:
-        try:
-            when = datetime.fromisoformat(client_datetime.replace("Z", "+00:00"))
-            when_src = "capture time / user input"
-        except ValueError:
-            when = None
-    if when is not None and when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-        when_src += " (no timezone, assumed UTC)"
-    eph = astro.moon_ephemeris(when) if when else None
-
     # ---------- segmentation / geometry
     seg = segment_moon(bgr)
     result: dict = {"hemisphere": hemisphere, "warnings": [], "warning_codes": []}
 
-    # ---------- which way is "waxing"?
-    mode = hemisphere
-    if mode == "auto":
-        mode = "date" if eph else "north"
-        if not eph:
-            result["warning_codes"].append("no_date")
-            result["warnings"].append(
-                "No date found, so waxing/waning assumes Northern-Hemisphere orientation "
-                "(lit on the right = waxing). Pick your hemisphere or add the date for a better answer.")
+    # ---------- which way is "waxing"? (from the picture + the observer's hemisphere)
+    mode = "south" if hemisphere == "south" else "north"
 
     # ---------- CNN
     cnn = get_cnn()
@@ -196,12 +161,8 @@ def analyze(data: bytes, hemisphere: str = "auto", client_datetime: str | None =
         cnn_band, cnn_wax = None, None
         band_p = geo_band
 
-    if mode == "date":
-        p_wax = 0.97 if eph.waxing else 0.03
-        wax_src = f"date ({when_src})"
-    else:
-        p_wax = geo_wax if cnn_wax is None else 0.5 * geo_wax + 0.5 * cnn_wax
-        wax_src = f"which side is lit ({'Southern' if mode == 'south' else 'Northern'} Hemisphere view)"
+    p_wax = geo_wax if cnn_wax is None else 0.5 * geo_wax + 0.5 * cnn_wax
+    wax_src = f"which side is lit ({'Southern' if mode == 'south' else 'Northern'} Hemisphere view)"
 
     final = compose_classes(band_p, p_wax)
     phase = max(final, key=final.get)
@@ -209,7 +170,7 @@ def analyze(data: bytes, hemisphere: str = "auto", client_datetime: str | None =
     # ---------- brightness
     frac = seg.fraction if seg.found else 0.0
     method_a = astro.class_reference_brightness(phase)
-    method_c = brightness.photometric_model(frac, eph.distance_km if eph else None)
+    method_c = brightness.photometric_model(frac)
     method_b = brightness.pixel_measurement(seg, exif) if seg.found else None
 
     result.update({
@@ -219,7 +180,7 @@ def analyze(data: bytes, hemisphere: str = "auto", client_datetime: str | None =
             "confidence": round(final[phase], 3),
             "probabilities": {c: round(v, 4) for c, v in sorted(final.items(), key=lambda x: -x[1])},
             "waxing_decided_by": wax_src,
-            "waxing_decided_by_code": mode,              # date | north | south
+            "waxing_decided_by_code": mode,              # north | south
             "p_waxing": round(p_wax, 3),
         },
         "geometry": {
@@ -244,14 +205,8 @@ def analyze(data: bytes, hemisphere: str = "auto", client_datetime: str | None =
             "pixel_measurement": method_b,
             "photometric_model": method_c,
         },
-        "ephemeris": eph.to_dict() if eph else None,
-        "ephemeris_source": when_src if eph else None,
-        "ephemeris_source_code": ("exif" if when_src.startswith("photo") else "client") if eph else None,
-        "exif": {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in exif.items()},
+        "exif": exif,
     })
-    if eph:
-        result["ephemeris_agrees"] = (eph.phase_class == phase)
-        result["fraction_difference"] = round(frac - eph.illuminated_fraction, 3) if seg.found else None
     if method_b and method_b["warnings"]:
         result["warnings"] += method_b["warnings"]
         result["warning_codes"].append("overexposed")

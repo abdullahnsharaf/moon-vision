@@ -100,17 +100,10 @@
       <fieldset>
         <legend data-i18n="whereLegend">Where are you?</legend>
         <div class="seg" id="hemi">
-          <button type="button" data-v="auto" class="on" data-i18n="hemiAuto">Use the date</button>
-          <button type="button" data-v="north" data-i18n="hemiNorth">Northern</button>
+          <button type="button" data-v="north" class="on" data-i18n="hemiNorth">Northern</button>
           <button type="button" data-v="south" data-i18n="hemiSouth">Southern</button>
         </div>
-        <p class="hint" data-i18n="hemiHint">Near the equator, use the date: the crescent lies on its back, so left and right don't tell waxing from waning.</p>
-      </fieldset>
-
-      <fieldset>
-        <legend data-i18n="whenLegend">When was it taken?</legend>
-        <input type="datetime-local" id="when" />
-        <p class="hint" data-i18n="whenHint">Optional. Read from the photo when it has a date.</p>
+        <p class="hint" data-i18n="hemiHint">Waxing or waning is read from the side that is lit. From the north, lit on the right means waxing; from the south it's the other way round.</p>
       </fieldset>
 
       <button id="go" class="btn go" type="button" disabled data-i18n="analyse">Analyse the Moon</button>
@@ -186,19 +179,13 @@
       </div>
     </section>
 
-    <section class="sheet" id="eph-panel" hidden>
-      <h2 data-i18n="ephTitle">Calendar check</h2>
-      <p id="eph-text" class="lede"></p>
-      <dl id="eph-kv" class="kv cols"></dl>
-    </section>
-
     <details class="sheet raw">
       <summary data-i18n="raw">Raw response</summary>
       <pre id="raw" dir="ltr"></pre>
     </details>
   </main>
 
-  <footer data-i18n="footer">Segmentation with OpenCV, phase classification with a neural network, brightness from Allen's lunar phase law, calendar from Meeus' ephemeris.</footer>
+  <footer data-i18n="footer">Segmentation with OpenCV, phase classification with a neural network, brightness from Allen's lunar phase law.</footer>
 
   <canvas id="grab" hidden></canvas>
   <script src="vendor/lottie_light.min.js"></script>

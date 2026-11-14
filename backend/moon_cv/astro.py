@@ -1,11 +1,9 @@
 """
-Astronomy helpers: lunar phase from a date, and the Moon's brightness
-as a function of phase angle.
+Astronomy helpers: phase classes, and the Moon's brightness as a function
+of phase angle.
 
 References
 ----------
-* Meeus, J. "Astronomical Algorithms", 2nd ed., ch. 47-48
-  (low-precision lunar position, phase angle, illuminated fraction).
 * Allen's Astrophysical Quantities (Cox 2002) Moon phase law:
       m(alpha) = -12.73 + 0.026|alpha| + 4e-9 * alpha^4      (alpha in degrees)
   where alpha is the Sun-Moon-Earth phase angle (0 = full, 90 = quarter, 180 = new).
@@ -15,8 +13,6 @@ References
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
 
 MEAN_DISTANCE_KM = 385_000.56
 FULL_MOON_MAG = -12.73
@@ -143,85 +139,3 @@ def class_reference_brightness(cls: str) -> dict:
         ],
         "percent_of_full_typical": round(100 * relative_to_full(m_mid), 2),
     }
-
-
-# --------------------------------------------------------------------------
-# Ephemeris: phase from a date (Meeus, truncated series)
-# --------------------------------------------------------------------------
-@dataclass
-class Ephemeris:
-    utc: str
-    phase_angle_deg: float
-    illuminated_fraction: float
-    waxing: bool
-    age_days: float
-    distance_km: float
-    phase_class: str
-    phase_label: str
-    magnitude: float
-    lux: float
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-
-def _julian_day(dt: datetime) -> float:
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    dt = dt.astimezone(timezone.utc)
-    return dt.timestamp() / 86400.0 + 2440587.5
-
-
-def moon_ephemeris(dt: datetime) -> Ephemeris:
-    jd = _julian_day(dt)
-    T = (jd - 2451545.0) / 36525.0
-    D = (297.8501921 + 445267.1114034 * T) % 360.0      # mean elongation
-    M = (357.5291092 + 35999.0502909 * T) % 360.0       # Sun mean anomaly
-    Mp = (134.9633964 + 477198.8675055 * T) % 360.0     # Moon mean anomaly
-
-    Dr, Mr, Mpr = _rad(D), _rad(M), _rad(Mp)
-    # Phase angle (Meeus 48.4)
-    i = (180.0 - D
-         - 6.289 * math.sin(Mpr)
-         + 2.100 * math.sin(Mr)
-         - 1.274 * math.sin(2 * Dr - Mpr)
-         - 0.658 * math.sin(2 * Dr)
-         - 0.214 * math.sin(2 * Mpr)
-         - 0.110 * math.sin(Dr))
-    i = i % 360.0
-    alpha = i if i <= 180.0 else 360.0 - i
-    waxing = (D % 360.0) < 180.0
-    k = phase_angle_to_fraction(alpha)
-
-    # Distance (main terms of Meeus table 47.A)
-    dist = (MEAN_DISTANCE_KM
-            - 20905.355 * math.cos(Mpr)
-            - 3699.111 * math.cos(2 * Dr - Mpr)
-            - 2955.968 * math.cos(2 * Dr)
-            - 569.925 * math.cos(2 * Mpr)
-            + 48.888 * math.cos(Mr)
-            - 3.149 * math.cos(2 * _rad(93.272 + 483202.0175 * T))
-            + 246.158 * math.cos(2 * Dr - 2 * Mpr)
-            - 152.138 * math.cos(2 * Dr - Mr - Mpr)
-            - 170.733 * math.cos(2 * Dr + Mpr)
-            - 204.586 * math.cos(2 * Dr - Mr)
-            - 129.620 * math.cos(Mr - Mpr)
-            + 108.743 * math.cos(Dr)
-            + 104.755 * math.cos(Mr + Mpr))
-
-    # Age: days since new moon, from elongation
-    age = (D % 360.0) / 360.0 * 29.530588853
-    cls = classify_fraction(k, waxing)
-    m = magnitude_from_phase_angle(alpha, dist)
-    return Ephemeris(
-        utc=(dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat(),
-        phase_angle_deg=round(alpha, 2),
-        illuminated_fraction=round(k, 4),
-        waxing=waxing,
-        age_days=round(age, 2),
-        distance_km=round(dist, 0),
-        phase_class=cls,
-        phase_label=PHASE_LABELS[cls],
-        magnitude=round(m, 2),
-        lux=magnitude_to_lux(m),
-    )

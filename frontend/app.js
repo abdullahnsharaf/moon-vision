@@ -6,7 +6,7 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const SAMPLES = ["samples/sample_crescent.jpg", "samples/sample_gibbous.jpg", "samples/sample_full.jpg", "samples/sample_quarter.jpg"];
 
-const state = { lang: "en", blob: null, hemisphere: "auto", result: null, health: null, stream: null };
+const state = { lang: "en", blob: null, hemisphere: "north", result: null, health: null, stream: null };
 const t = () => I18N[state.lang];
 
 /* ================================================================ language */
@@ -167,11 +167,7 @@ segmented("#viewsel", v => showViz(v));
 
 function setImage(blob, fromCamera = false) {
   state.blob = blob; state.exif = {};
-  if (fromCamera) $("#when").value = toLocalInput(new Date());
-  else readExif(blob).then(x => {
-    state.exif = x;
-    if (x.date && !$("#when").value) $("#when").value = toLocalInput(x.date);
-  });
+  if (!fromCamera) readExif(blob).then(x => { state.exif = x; });
   const img = $("#preview");
   img.src = URL.createObjectURL(blob); img.hidden = false;
   img.style.animation = "none"; img.offsetHeight; img.style.animation = "";
@@ -218,7 +214,6 @@ async function analyse() {
   fd.append("file", upload, state.blob.name || "moon.jpg");
   for (const k of ["exposure_time", "f_number", "iso"]) if (state.exif?.[k]) fd.append(k, state.exif[k]);
   fd.append("hemisphere", state.hemisphere);
-  if ($("#when").value) fd.append("taken_at", new Date($("#when").value).toISOString());
   const minWait = new Promise(r => setTimeout(r, REDUCED ? 0 : 1300));    // let the dial "scan" for a moment
   try {
     const res = await fetch(`${API}/api/analyze`, { method: "POST", body: fd });
@@ -236,15 +231,14 @@ function showError(m) { const e = $("#err"); e.textContent = m; e.hidden = false
 
 /* ================================================================ upload prep
    Vercel functions accept at most 4.5 MB per request. Large photos are shrunk in
-   the browser (max 2048 px, JPEG). Shrinking drops EXIF, so the date and exposure
-   are read first and sent as separate form fields. */
+   the browser (max 2048 px, JPEG). Shrinking drops EXIF, so the exposure settings
+   (used to calibrate pixel brightness) are read first and sent as separate fields. */
 const MAX_UPLOAD = 3.5 * 1024 * 1024, MAX_SIDE = 2048;
 async function readExif(blob) {
   try {
     const e = await exifr.parse(blob);
     if (!e) return {};
-    return { date: e.DateTimeOriginal instanceof Date ? e.DateTimeOriginal : null,
-             exposure_time: e.ExposureTime, f_number: e.FNumber, iso: Array.isArray(e.ISO) ? e.ISO[0] : e.ISO };
+    return { exposure_time: e.ExposureTime, f_number: e.FNumber, iso: Array.isArray(e.ISO) ? e.ISO[0] : e.ISO };
   } catch (err) { return {}; }
 }
 async function prepareUpload(blob) {
@@ -282,7 +276,6 @@ function render(r, { animate }) {
   const chips = [chip(L.chipConf, `${Math.round(ph.confidence * 100)}%`, ph.confidence > .6 ? "ok" : "warn")];
   if (r.cnn.available) chips.push(chip(L.chipCnn, L.phases[r.cnn.top]));
   chips.push(chip(L.chipWax, L.waxBy[ph.waxing_decided_by_code] || ph.waxing_decided_by));
-  if (r.ephemeris) chips.push(chip(L.chipCal, L.phases[r.ephemeris.phase_class], r.ephemeris_agrees ? "ok" : "warn"));
   const B = r.brightness.pixel_measurement;
   (r.warning_codes || []).forEach(c => {
     const long = typeof L.warnLong[c] === "function" ? L.warnLong[c](B ? B.saturated_percent : "") : L.warnLong[c];
@@ -344,24 +337,10 @@ function render(r, { animate }) {
   $("#c-unit").textContent = L.cUnit(num(C.magnitude));
   $("#c-kv").innerHTML = kv([
     [L.vsFull, `${C.percent_of_full}%`], [L.phaseAngle, `${C.phase_angle_deg}°`],
-    [L.litMeasured, pct(C.illuminated_fraction)], [L.distCorr, C.distance_corrected ? L.yes : L.noDate],
+    [L.litMeasured, pct(C.illuminated_fraction)],
   ]);
   renderScale(r);
 
-  // --- calendar
-  const Eph = r.ephemeris; $("#eph-panel").hidden = !Eph;
-  if (Eph) {
-    const date = new Date(Eph.utc).toLocaleString(state.lang === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { dateStyle: "long", timeStyle: "short" });
-    $("#eph-text").textContent = [
-      L.ephText(date, L.ephSrc[r.ephemeris_source_code] || "", L.phases[Eph.phase_class], num(pct(Eph.illuminated_fraction))),
-      r.ephemeris_agrees ? L.ephAgree : L.ephDisagree(label),
-      r.fraction_difference != null ? L.ephDiff(num((r.fraction_difference * 100).toFixed(1))) : "",
-    ].join(" ");
-    $("#eph-kv").innerHTML = kv([
-      [L.eph.age, `${Eph.age_days} ${L.eph.days}`], [L.eph.angle, `${Eph.phase_angle_deg}°`],
-      [L.eph.dist, `${Eph.distance_km.toLocaleString("en")} ${L.eph.km}`], [L.eph.mag, Eph.magnitude],
-    ]);
-  }
   $("#raw").textContent = JSON.stringify({ ...r, images: r.images ? "[base64 images omitted]" : undefined }, null, 2);
 
   const main = $("#results"); main.hidden = false;
@@ -384,7 +363,7 @@ function showViz(which) {
 }
 
 function renderScale(r) {
-  const L = t(), A = r.brightness.class_reference, C = r.brightness.photometric_model, E = r.ephemeris;
+  const L = t(), A = r.brightness.class_reference, C = r.brightness.photometric_model;
   const pos = p => Math.max(0, Math.min(100, (Math.log10(Math.max(p, .1)) + 1) / 3 * 100));   // 0.1% … 100%
   const rows = [
     `<div class="cbar"><span>${esc(L.scaleA)}</span><div class="track">
@@ -392,10 +371,6 @@ function renderScale(r) {
       <div class="dot" style="left:${pos(A.percent_of_full_typical)}%"></div></div><span class="val">${A.percent_of_full_typical}%</span></div>`,
     `<div class="cbar"><span>${esc(L.scaleC)}</span><div class="track"><div class="dot" style="left:${pos(C.percent_of_full)}%;animation-delay:.15s"></div></div><span class="val">${C.percent_of_full}%</span></div>`,
   ];
-  if (E) {
-    const pe = 100 * Math.pow(10, -0.4 * (E.magnitude + 12.73));
-    rows.push(`<div class="cbar"><span>${esc(L.scaleE)}</span><div class="track"><div class="dot az" style="left:${pos(pe)}%;animation-delay:.3s"></div></div><span class="val">${pe.toFixed(1)}%</span></div>`);
-  }
   rows.push(`<div class="axis"><span></span><div><span>0.1%</span><span>1%</span><span>10%</span><span>100%</span></div><span></span></div>`);
   $("#compare-bars").innerHTML = rows.join("") + `<p class="cap">${esc(L.scaleCap)}</p>`;
 }
@@ -415,6 +390,5 @@ function kv(rows) { return rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd><bdi>${es
 function pct(x) { return (x * 100).toFixed(1) + "%"; }
 function fmtLux(x) { const L = t(); return x >= .01 ? `${x.toFixed(3)} ${L.lux}` : `${(x * 1000).toFixed(2)} ${L.mlux}`; }
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
-function toLocalInput(d) { return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
 
 setLang(initialLang());

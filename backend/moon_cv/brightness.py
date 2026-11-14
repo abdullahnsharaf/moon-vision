@@ -9,6 +9,7 @@ B. pixel_measurement - measure the lit pixels from the segmentation mask.
 C. photometric_model - continuous estimate: measured illuminated fraction
                        -> phase angle -> apparent magnitude -> illuminance
                        (lux) on the ground. Independent of camera exposure.
+                       Assumes the mean Earth-Moon distance.
 """
 from __future__ import annotations
 
@@ -75,9 +76,9 @@ def pixel_measurement(seg, exif: dict | None) -> dict:
     return out
 
 
-def photometric_model(fraction: float, distance_km: float | None = None) -> dict:
+def photometric_model(fraction: float) -> dict:
     alpha = astro.fraction_to_phase_angle(fraction)
-    m = astro.magnitude_from_phase_angle(alpha, distance_km)
+    m = astro.magnitude_from_phase_angle(alpha)
     return {
         "method": "photometric_model",
         "illuminated_fraction": round(fraction, 4),
@@ -85,7 +86,6 @@ def photometric_model(fraction: float, distance_km: float | None = None) -> dict
         "magnitude": round(m, 2),
         "lux": astro.magnitude_to_lux(m),
         "percent_of_full": round(100 * astro.relative_to_full(m), 2),
-        "distance_corrected": bool(distance_km),
         "note": "Brightness falls much faster than the lit area: a half Moon is only "
                 "~9% as bright as a full Moon (shadows + opposition surge).",
     }
